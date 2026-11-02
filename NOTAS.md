@@ -56,3 +56,54 @@
   Diagnóstico: `file .env`. Correção: `sed -i 's/\r$//' .env` e VS Code em LF.
 - **Senhas dentro de URIs** (`postgresql://user:senha@host`): evitar `@ : / ? #`.
   Uso `openssl rand -hex 24` para gerar senhas só com letras e números.
+
+## Dia 4 — Load balancer, API gateway e redes separadas
+
+### O que fiz
+- API própria publicada em `gw.localhost/api`, com 3 réplicas atrás do Traefik
+  (`docker compose up -d --scale api=3`).
+- Middlewares no Traefik: remoção de prefixo (`stripprefix`), limite de taxa
+  (`ratelimit`) e autenticação (`basicauth`).
+- Painel do Traefik em `traefik.localhost`, protegido por usuário e senha.
+- Redes separadas: `proxy` (Traefik + apps) e `backend` (apps + Postgres + Redis).
+
+### O que aprendi
+- **Proxy reverso** fica do lado do servidor: recebe tudo e repassa ao container certo.
+- **Load balancer** é um proxy reverso que distribui requisições entre cópias do
+  mesmo serviço (round robin) e tira da roda as que caem.
+- **API gateway** decide quem passa e com quais regras, usando middlewares.
+  Aqui o Traefik faz os três papéis.
+- **Labels** são etiquetas chave=valor; o Docker só guarda, o Traefik lê e monta
+  as rotas. A configuração de cada rota mora junto do próprio app.
+- **Tolerância a falha:** derrubei uma réplica no meio de um laço de requisições
+  e nenhuma falhou; o Traefik tirou ela da roda na hora.
+  - `docker stop` respeita o `restart: unless-stopped` (não volta sozinho).
+  - `docker kill` simula uma queda (volta sozinho).
+- **Rate limit:** numa rajada de 60 requisições, parte voltou `429 Too Many Requests`.
+- **Redes separadas = menor privilégio.** O Traefik, única peça exposta, não
+  alcança o banco (`ping postgres` de dentro dele dá `bad address`).
+  Reduz o "raio de explosão" se ele for comprometido.
+- **Ler códigos HTTP:**
+  - `404` → nenhuma rota combinou.
+  - `401` → a rota existe, mas pediu autenticação.
+  - `502 Bad Gateway` → o Traefik alcançou o container, mas ninguém respondeu
+    (app subindo ou caído).
+  - `504 Gateway Timeout` → o Traefik não alcançou o container (rede errada).
+- **Senhas do painel:** o Traefik guarda só o hash (gerado com `htpasswd`), nunca a
+  senha. `htpasswd -n admin` pede a senha sem deixá-la no histórico do terminal.
+
+### Erros e como resolvi
+- **`services.include must be a mapping`:** colei o `include:` dentro de `services:`.
+  Validar sempre com `docker compose config -q` depois de editar o YAML.
+- **`504` no n8n e no Keycloak depois de separar as redes:** com duas redes, o
+  Traefik às vezes usava o IP da `backend`, que ele não alcança.
+  Correção: `--providers.docker.network=pdi_proxy` no Traefik.
+- **`502` no Keycloak:** ele ainda estava subindo (recompila a configuração ao ser
+  recriado). Esperar a linha `Listening on` nos logs.
+- **Laço de `curl` com linhas vazias:** digitei `http//` sem os dois-pontos, e o
+  `-s` escondeu o erro. Quando um comando silencioso não mostra nada, rodar sem `-s`.
+- **`upp` em vez de `up`:** o Compose só mostrou a ajuda.
+- **Hash da senha no repositório público:** coloquei no `.env` (fora do Git), entre
+  aspas simples, para o Compose não interpretar os `$`. O ponto final faz parte do hash.
+- **`docker compose restart` não aplica labels novas:** é preciso `up -d` para
+  recriar o container com a configuração atual.
