@@ -1,0 +1,45 @@
+#cloud-config
+users:
+  - name: deploy
+    groups: [sudo]
+    shell: /bin/bash
+    sudo: "ALL=(ALL) NOPASSWD:ALL"
+    ssh_authorized_keys:
+      - ${ssh_public_key}
+
+package_update: true
+package_upgrade: true
+packages: [ufw, fail2ban, git, unattended-upgrades]
+
+write_files:
+  - path: /etc/ssh/sshd_config.d/99-hardening.conf
+    content: |
+      PermitRootLogin no
+      PasswordAuthentication no
+  - path: /opt/pdi/.env
+    permissions: "0600"
+    content: |
+      DOMAIN=${domain}
+      PROTOCOL=http
+      ACME_EMAIL=${acme_email}
+      APP_MESSAGE="Ola da VPS"
+      POSTGRES_USER=pdi
+      POSTGRES_PASSWORD=${pg_password}
+      REDIS_PASSWORD=${redis_password}
+      N8N_ENCRYPTION_KEY=${n8n_key}
+      KEYCLOAK_ADMIN_PASSWORD=${kc_password}
+      EVOLUTION_API_KEY=${evo_key}
+      TRAEFIK_DASHBOARD_AUTH='${traefik_auth}'
+
+runcmd:
+  - ufw default deny incoming
+  - ufw allow 22/tcp
+  - ufw allow 80/tcp
+  - ufw allow 443/tcp
+  - ufw --force enable
+  - systemctl restart ssh
+  - curl -fsSL https://get.docker.com | sh
+  - usermod -aG docker deploy
+  - chown deploy:deploy /opt/pdi/.env
+  - git clone ${repo_url} /opt/pdi/repo
+  - cd /opt/pdi/repo/stack && docker compose --env-file /opt/pdi/.env up -d --build
