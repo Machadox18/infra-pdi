@@ -162,4 +162,46 @@ e `curl` em `/v2/account` (200 = token válido).
   variáveis não estavam lá. Solução: `source scripts/env.sh` em todo terminal novo.
 - **`No configuration files`:** rodei o `terraform` fora da pasta `terraform/`.
 - **Terminal abrindo no PowerShell:** entrei no Ubuntu digitando `wsl`.  
+
+## Dia 6 — cloud-init: o servidor nasce pronto
+
+### O que fiz
+- Template `terraform/cloud-init.yaml.tftpl`: usuário `deploy`, hardening do SSH,
+  UFW, fail2ban, Docker, clone do repositório, `.env` e `docker compose up`.
+- Senhas geradas pelo Terraform (`random_password`), passadas ao template via
+  `templatefile` e gravadas no `/opt/pdi/.env` do Droplet.
+- Saídas `sensitive` para consultar senhas: `terraform output -raw keycloak_admin_password`.
+- Resultado: `terraform apply` → em poucos minutos, 7 serviços `Up` no Droplet,
+  sem eu digitar nenhum comando de instalação dentro dele. Só o Traefik com porta publicada.
+
+### O que aprendi
+- **Dois YAML, dois papéis:** o cloud-init prepara a máquina no primeiro boot;
+  o Compose sobe os containers. O cloud-init chama o Compose no fim.
+- **`${nome}` só no template (`.tftpl`):** o Terraform preenche.
+  No `.env` local vão os valores de verdade.
+- **Heredoc:** `<< EOF` (sem aspas) executa `$(...)` e expande variáveis antes
+  de gravar; `<< 'EOF'` (com aspas) grava o texto literal.
+- **O Droplet só conhece o que está no GitHub:** commit e push antes do `apply`.
+- **Mudar o `user_data` recria o Droplet:** o cloud-init só roda no primeiro boot.
+- **Corrigir na origem e recriar** é melhor que remendar o servidor à mão.
+- **Grupos do Linux são lidos no login:** depois do `usermod`, é preciso sair e
+  entrar de novo (ou `newgrp docker`).
+- **O cloud-init roda tudo como root:** arquivos criados por ele pertencem ao root.
+- `sudo cloud-init status --wait` espera o primeiro boot terminar.
+
+### Erros e como resolvi
+- **`422 Size is not available in this region`:** sem capacidade do plano em `nyc1`
+  e `nyc3`. Consultei a API (`/v2/sizes`) e troquei para `tor1` no `terraform.tfvars`.
+  A região como variável permitiu contornar com uma linha.
+- **`no file exists at cloud-init.yaml.tftpl`:** o arquivo estava como `yamal`.
+- **Template colado no `stack/.env` local:** quebrou o ambiente local e deixou o
+  hash do Traefik vazio. Recriei o `.env` com senhas novas (`openssl rand -hex 24`).
+- **Painel do Traefik com `no users found`:** o `TF_VAR_traefik_dashboard_auth`
+  estava vazio no `apply`. Acrescentei `validation` na variável: agora o `plan`
+  para com mensagem clara.
+- **`open /opt/pdi/.env: permission denied`:** o `.env` pertencia ao root.
+  Acrescentei `chown deploy:deploy /opt/pdi/.env` ao `runcmd`.
+- **`503` na API:** ela estava na rede `backend`, e a correção não tinha ido
+  para o GitHub. Rodei comandos de Git dentro do Droplet por engano (prompt
+  `deploy@pdi-app`). Agora uso dois terminais: um para o PC, outro para o servidor.
   
