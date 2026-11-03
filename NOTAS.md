@@ -107,3 +107,59 @@
   aspas simples, para o Compose não interpretar os `$`. O ponto final faz parte do hash.
 - **`docker compose restart` não aplica labels novas:** é preciso `up -d` para
   recriar o container com a configuração atual.
+
+  ## Dia 5 — Terraform cria o Droplet na DigitalOcean
+
+### O que fiz
+- Escrevi `versions.tf`, `variables.tf`, `main.tf` e `outputs.tf` para a DigitalOcean:
+  chave SSH, Droplet (`s-2vcpu-4gb`, Ubuntu 24.04, `nyc1`) e firewall.
+- Rodei o ciclo completo: `init` → `plan` → `apply` → `ssh` → `destroy`.
+- Criei `scripts/env.sh` para preparar o terminal (token + chave SSH) com
+  `source scripts/env.sh`.
+
+### O que vi acontecer
+- `plan`: `3 to add` (chave SSH, Droplet e firewall). Campos como `id` e
+  `ipv4_address` aparecem como `(known after apply)`: só existem depois de criados.
+- `apply`: o Terraform criou na ordem certa sozinho, sem eu dizer:
+  chave SSH (2s) → Droplet (23s) → firewall (1s).
+  O firewall depende do ID do Droplet, e o Droplet depende da chave.
+  Ele monta esse grafo de dependências lendo as referências no código.
+- Output: `server_ip` com o IP público, usado direto no
+  `ssh root@$(terraform output -raw server_ip)`.
+- Dentro do servidor: 2 vCPUs, ~3.8 GB de RAM, disco de 80 GB.
+- `destroy`: ordem inversa (firewall → Droplet → chave), `3 destroyed`.
+  O plano de destruição mostrou o que o state guardava: IDs, IPs (público e
+  privado), preço por hora (US$ 0,03571) e mensal (US$ 24).
+- Na primeira conexão SSH, o `ssh` pediu para confirmar a impressão digital do
+  servidor e a guardou em `~/.ssh/known_hosts`. Num servidor recriado, o IP pode
+  repetir com outra impressão digital, e o SSH vai reclamar.
+
+### O que aprendi
+- **IaC na prática:** o servidor existe porque o código diz que existe.
+  Apagar e recriar é um comando.
+- **`plan` antes de `apply`, sempre.** O `plan` não testa o token para
+  recursos novos (só compara o código com o state vazio); o erro de
+  autenticação só apareceu no `apply`.
+- **State (`terraform.tfstate`)** é o caderno do Terraform: guarda o que ele
+  criou, inclusive dados sensíveis. Fica fora do Git.
+- **`.terraform.lock.hcl`** fixa a versão exata dos providers e vai para o Git.
+- **Segredos x não segredos:** token só em variável de ambiente;
+  domínio, e-mail e URL do repo no `terraform.tfvars` (fora do Git).
+- **Firewall da DigitalOcean bloqueia nos dois sentidos:** sem `outbound_rule`,
+  o Droplet não acessa a internet.
+- `TF_VAR_nome` passa valores para a variável `nome` do Terraform.
+- Variáveis de ambiente valem só no terminal onde foram criadas.
+
+### Erros e como resolvi
+- **`Invalid multi-line string` no `terraform.tfvars`:** faltou fechar aspas.
+  `terraform fmt` acha esse tipo de erro rápido.
+- **`401 Unable to authenticate you`:** o token tinha 74 caracteres em vez de 71.
+  Causa: `Ctrl + V` não cola no terminal do Linux, ele insere caracteres de
+  controle invisíveis. No terminal: `Ctrl + Shift + V` ou botão direito.
+  Diagnóstico sem expor o token: `echo ${#DIGITALOCEAN_TOKEN}` (só o tamanho)
+e `curl` em `/v2/account` (200 = token válido).
+- **Terraform perguntando `var.ssh_public_key`:** abri um terminal novo e as
+  variáveis não estavam lá. Solução: `source scripts/env.sh` em todo terminal novo.
+- **`No configuration files`:** rodei o `terraform` fora da pasta `terraform/`.
+- **Terminal abrindo no PowerShell:** entrei no Ubuntu digitando `wsl`.  
+  
