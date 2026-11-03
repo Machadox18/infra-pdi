@@ -40,7 +40,7 @@ services:
 
   api:
     build: ./api
-    networks: [backend]
+    networks: [proxy]
     environment:
       APP_MESSAGE: ${APP_MESSAGE}
     labels:
