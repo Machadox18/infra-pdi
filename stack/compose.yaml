@@ -19,7 +19,7 @@ services:
     labels:
       - traefik.enable=true
       - traefik.http.routers.dashboard.rule=Host(`traefik.${DOMAIN}`)
-       - traefik.http.routers.dashboard.entrypoints=websecure                    # NOVO
+      - traefik.http.routers.dashboard.entrypoints=websecure                    # NOVO
       - traefik.http.routers.dashboard.tls.certresolver=le                      # NOVO
       - traefik.http.routers.dashboard.service=api@internal
       - traefik.http.routers.dashboard.middlewares=dashboard-auth
@@ -87,7 +87,7 @@ services:
     labels:
       - traefik.enable=true
       - traefik.http.routers.n8n.rule=Host(`n8n.${DOMAIN}`)
-       - traefik.http.routers.n8n.entrypoints=websecure                          # NOVO
+      - traefik.http.routers.n8n.entrypoints=websecure                          # NOVO
       - traefik.http.routers.n8n.tls.certresolver=le                            # NOVO
       - traefik.http.services.n8n.loadbalancer.server.port=5678
     restart: unless-stopped    
