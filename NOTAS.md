@@ -204,4 +204,43 @@ e `curl` em `/v2/account` (200 = token válido).
 - **`503` na API:** ela estava na rede `backend`, e a correção não tinha ido
   para o GitHub. Rodei comandos de Git dentro do Droplet por engano (prompt
   `deploy@pdi-app`). Agora uso dois terminais: um para o PC, outro para o servidor.
+
+## Dia 7 — DNS e HTTPS
+
+### O que fiz
+- DNS com DuckDNS: `curl` na API do DuckDNS depois do `apply` aponta
+  `pdi-dogabriel.duckdns.org` (e qualquer subdomínio) para o IP do Droplet.
+- HTTPS com Let's Encrypt (staging) pelo Traefik: entrypoint `websecure` (443),
+  redirecionamento HTTP → HTTPS (308) e resolver `le` com desafio HTTP.
+- Labels `entrypoints=websecure` e `tls.certresolver=le` em cada router.
+- `PROTOCOL=https` no template do cloud-init.
+
+### O que aprendi
+- **Registro curinga:** um único `*` aponta todos os subdomínios para o mesmo IP;
+  quem separa os apps é o Traefik, pelo `Host`.
+- **TTL curto (60s):** quando o IP muda numa recriação, o mundo descobre rápido.
+- **Desafio HTTP do ACME:** o Let's Encrypt chama `http://dominio/.well-known/...`
+  na porta 80 para provar que eu controlo o domínio. Por isso a porta 80 continua aberta.
+- **Staging x produção:** staging não tem limite de emissões, mas o certificado não é
+  confiável (aviso no navegador). Produção só na subida final, porque há limite de
+  certificados repetidos por semana.
+- `openssl s_client ... | grep issuer` mostra quem emitiu o certificado.
+- `curl -k` aceita qualquer certificado: um `200` com `-k` não prova que o certificado
+  é o certo.
+- Aba anônima evita o cache de DNS e de HTTPS do navegador.
+
+### Erros e como resolvi
+- **`404 domain not found` no `digitalocean_record`:** o `terraform.tfvars` estava com
+  o domínio de exemplo, e esse recurso só serve para domínio com DNS na DigitalOcean.
+  Com DuckDNS, removi o bloco.
+- **`KO` no DuckDNS:** o token não estava carregado. Acrescentei o pedido do token ao
+  `env.sh`, que agora mostra o tamanho dos três segredos no fim.
+- **`404` no HTTPS:** linhas da lista de labels com recuo maior grudaram na linha de cima
+  (`Host(...) - traefik.http.routers...`). O YAML continua válido, então o
+  `docker compose config -q` não acusa; só o Traefik percebe. Diagnóstico: logs do
+  Traefik e `docker compose config` completo.
+- **`acme.json: no such file or directory`:** o volume `letsencrypt` não estava montado,
+  e o resolver foi desligado. Corrigi o bloco `volumes:` do Traefik.
+- **Corrigi o Droplet sem recriá-lo:** como só o `compose.yaml` mudou, bastou
+  `git pull` + `docker compose up -d` no servidor.  
   
