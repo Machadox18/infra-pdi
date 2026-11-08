@@ -1,0 +1,37 @@
+name: infra
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "O que fazer"
+        type: choice
+        options: [up, down, recreate]
+
+concurrency:
+  group: infra
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+
+      - name: make ${{ inputs.action }}
+        run: make ${{ inputs.action }}
+        env:
+          DIGITALOCEAN_TOKEN: ${{ secrets.DIGITALOCEAN_TOKEN }}
+          DUCKDNS_TOKEN: ${{ secrets.DUCKDNS_TOKEN }}
+          TF_VAR_ssh_public_key: ${{ secrets.SSH_PUBLIC_KEY }}
+          TF_VAR_traefik_dashboard_auth: ${{ secrets.TRAEFIK_DASHBOARD_AUTH }}
+          TF_VAR_domain: ${{ vars.DOMAIN }}
+          TF_VAR_acme_email: ${{ vars.ACME_EMAIL }}
+          TF_VAR_region: ${{ vars.REGION }}
+          TF_VAR_repo_url: ${{ github.server_url }}/${{ github.repository }}.git
+          DOMAIN: ${{ vars.DOMAIN }}
