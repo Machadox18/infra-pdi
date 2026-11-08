@@ -15,7 +15,6 @@ services:
       - --certificatesresolvers.le.acme.email=${ACME_EMAIL}                     # NOVO
       - --certificatesresolvers.le.acme.storage=/letsencrypt/acme.json          # NOVO
       - --certificatesresolvers.le.acme.httpchallenge.entrypoint=web            # NOVO
-      - --certificatesresolvers.le.acme.caserver=https://acme-staging-v02.api.letsencrypt.org/directory  # NOVO (tirar no Dia 10)
     labels:
       - traefik.enable=true
       - traefik.http.routers.dashboard.rule=Host(`traefik.${DOMAIN}`)
