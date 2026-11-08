@@ -300,5 +300,110 @@ e `curl` em `/v2/account` (200 = token válido).
   outros dependendo dele.
   Lição: funcionar na minha máquina não garante funcionar no CI.
 - **Esse erro deixou o Droplet ligado (e cobrando):** depois de qualquer falha no
-  `down`, conferir o painel da DigitalOcean.  
+  `down`, conferir o painel da DigitalOcean.
+
+## Dia 9 — Escalonamento vertical e horizontal
+
+### Parte A — Vertical (máquina maior)
+
+**O que fiz:** com a stack no ar, rodei
+`terraform apply -var size=s-4vcpu-8gb`, com `resize_disk = false` no Droplet.
+
+**O que vi:**
+- O `plan` mostrou `~ update in-place`: o mesmo servidor, mesmo IP, mesmos dados.
+  Só o `size` mudou (`s-2vcpu-4gb` → `s-4vcpu-8gb`).
+- A operação levou **1 minuto e 35 segundos**. Nesse tempo, o Droplet ficou
+  desligado: a stack ficou **fora do ar**.
+- Depois: 4 vCPUs e 8 GB de RAM. Os containers voltaram sozinhos
+  (`restart: unless-stopped`).
+- Preço: de **US$ 0,03571/h** para **US$ 0,07143/h** (US$ 24 → US$ 48 por mês).
+  O dobro.
+- Antes, consultei a API para confirmar que o plano maior existia na região.
+
+**O que aprendi:**
+- `resize_disk = false` aumenta só CPU e RAM. Sem ele, o disco cresce junto e
+  nunca mais pode diminuir, e não dá para voltar ao plano menor.
+- **`-var` vale só para aquele comando.** No `make up` seguinte, o Terraform voltou
+  ao tamanho do `tfvars`. Para uma mudança permanente, o valor vai no `tfvars`
+  (ou numa variável do GitHub), não no `-var`.
+
+### Parte B — Horizontal (mais máquinas, Docker Swarm)
+
+**O que fiz:**
+- Terraform: VPC (`10.10.10.0/24`), workers com `count = var.worker_count`,
+  firewall cobrindo todos os Droplets e liberando a rede privada entre eles,
+  saídas `app_private_ip` e `worker_ips`.
+- cloud-init: `ufw allow from` a VPC no app e nos workers; template próprio e
+  mais enxuto para os workers (sem stack, sem `.env`, sem `package_upgrade`).
+- Imagem da API publicada no GitHub Container Registry
+  (`ghcr.io/machadox18/pdi-api:1.0`), pública.
+- `stack/stack.yaml`: versão da stack para o Swarm.
+- `make swarm`: `docker swarm init` no manager (pelo IP privado) e
+  `docker swarm join` em cada worker.
+
+**O que vi:**
+- `make up`: o Droplet foi **recriado** (`must be replaced`), porque entrar na VPC
+  (`vpc_uuid`) e mudar o cloud-init (`user_data`) forçam a recriação.
+  Stack no ar em **340 segundos**.
+- Worker criado em 23 segundos com `apply -var worker_count=1`, sem tocar no manager.
+- `make swarm`: `Swarm initialized` no manager e `joined a swarm as a worker` no worker.
+- `docker node ls`: 2 nós `Ready`, o `pdi-app` como `Leader`.
+- `docker stack deploy`: 7 serviços criados; a API com **4 réplicas divididas**
+  entre `pdi-app` e `pdi-worker-1`.
+- `docker service scale pdi_api=8`: 8 réplicas, 4 em cada servidor,
+  convergido em segundos.
+- `docker node update --availability drain pdi-worker-1`: as 4 réplicas do worker
+  foram para `Shutdown`, e o Swarm criou 4 novas no manager na mesma hora.
+
+**O que aprendi:**
+- **Swarm = cluster de servidores Docker.** O manager decide onde cada container
+  roda; o worker só executa. O cluster se comunica pela rede privada.
+- **Rede overlay:** liga containers de servidores diferentes como se estivessem
+  lado a lado.
+- **No Swarm não existe `build`:** cada servidor baixa a imagem pronta de um registry.
+- **Volumes são locais:** Postgres, Traefik e Evolution ficam presos ao manager
+  (`placement.constraints: [node.role == manager]`), senão perderiam os dados ao
+  mudar de servidor.
+- **No Swarm, as labels ficam dentro de `deploy:`**, o Traefik usa
+  `--providers.swarm` e exige a label de porta mesmo no painel.
+- `docker stack deploy` não lê o `.env`: é preciso carregar antes
+  (`set -a; . /opt/pdi/.env; set +a`).
+- Mesmo nome de stack (`pdi`) = mesmos nomes de volume do Compose: os dados e o
+  certificado do manager foram reaproveitados.
+- **`drain`** tira um servidor da roda para manutenção, e o cluster redistribui
+  as réplicas sozinho.
+
+### Comparação
+
+| | Vertical | Horizontal |
+| --- | --- | --- |
+| Tempo fora do ar | ~1min35s (Droplet desligado no resize) | Nenhum: no `drain`, réplicas recriadas no outro servidor na hora |
+| Custo por hora | Dobrou (US$ 0,036 → 0,071) | Soma o preço de um worker menor |
+| Limite | O maior Droplet disponível | Praticamente sem limite (mais workers) |
+| O que precisou mudar | Uma variável | VPC, firewall, cloud-init, registry, Swarm e arquivo de stack |
+
+**Conclusão:** o vertical é simples, mas para o serviço e tem teto. O horizontal
+escala sem parar e quase sem limite, mas exige muito mais preparo. É por isso que
+existem orquestradores como Swarm e Kubernetes.
+
+### Erros e como resolvi
+- **`Blocks of type "variable" are not expected here`:** colei o `worker_count`
+  dentro do bloco de outra variável. Reescrevi o `variables.tf` com cada bloco
+  fechado antes do próximo. `terraform fmt` ajuda a ver a indentação torta.
+- **`docker: command not found` no Ubuntu:** o Docker Desktop estava fechado.
+- **`read -s` com várias linhas coladas de uma vez:** ele pode "comer" a linha
+  seguinte como se fosse o valor. Rodar o `read` sozinho e conferir o tamanho.
+- **`invalid reference format`:** um `~` no fim do nome da imagem.
+- **`denied` no push para o GHCR (as camadas subiam, o manifesto não):** o token
+  estava certo (`write:packages`). A causa era o manifesto de atestado que o Docker
+  Desktop envia. Resolvido com `docker build --provenance=false`.
+- **`This node is not a swarm manager`:** rodei `docker node ls` no meu computador.
+  Comandos de cluster vão no manager (`make ssh`).
+- **`exit` + `make down` colados juntos:** o `make down` não rodou e os servidores
+  ficaram ligados. Sempre confirmar no painel depois de destruir.
+
+### Para a apresentação
+- Repetir o `drain` com um laço de `curl` rodando ao lado, para mostrar que
+  nenhuma requisição falha.
+- Medir o tempo fora do ar do vertical com o laço de `curl` (`grep -c " 000"`).    
   
