@@ -1,0 +1,26 @@
+#cloud-config
+users:
+  - name: deploy
+    groups: [sudo]
+    shell: /bin/bash
+    sudo: "ALL=(ALL) NOPASSWD:ALL"
+    ssh_authorized_keys:
+      - ${ssh_public_key}
+
+package_update: true
+packages: [ufw, fail2ban]
+
+write_files:
+  - path: /etc/ssh/sshd_config.d/99-hardening.conf
+    content: |
+      PermitRootLogin no
+      PasswordAuthentication no
+
+runcmd:
+  - ufw default deny incoming
+  - ufw allow 22/tcp
+  - ufw allow from ${vpc_cidr}
+  - ufw --force enable
+  - systemctl restart ssh
+  - curl -fsSL https://get.docker.com | sh
+  - usermod -aG docker deploy

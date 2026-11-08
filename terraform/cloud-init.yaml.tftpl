@@ -36,6 +36,7 @@ runcmd:
   - ufw allow 22/tcp
   - ufw allow 80/tcp
   - ufw allow 443/tcp
+  - ufw allow from ${vpc_cidr}
   - ufw --force enable
   - systemctl restart ssh
   - curl -fsSL https://get.docker.com | sh
