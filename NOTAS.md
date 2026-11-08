@@ -243,4 +243,62 @@ e `curl` em `/v2/account` (200 = token válido).
   e o resolver foi desligado. Corrigi o bloco `volumes:` do Traefik.
 - **Corrigi o Droplet sem recriá-lo:** como só o `compose.yaml` mudou, bastou
   `git pull` + `docker compose up -d` no servidor.  
+
+## Dia 8 — O "um clique"
+
+### O que fiz
+- **Makefile** com `make up`, `make down`, `make recreate` e `make ssh`.
+  O `up` faz `init` → `apply` → atualiza o DuckDNS → espera o n8n responder.
+- **`scripts/wait-ready.sh`:** tenta a URL a cada 10 segundos (com limite de
+  15 minutos) e mostra quanto tempo a stack levou para responder.
+- **State remoto no HCP Terraform:** workspace `infra-pdi`, com Execution Mode
+  **Local** (o Terraform roda na minha máquina ou no GitHub e só guarda o state lá).
+- **Botão no GitHub Actions** (`.github/workflows/infra.yml`), com
+  `workflow_dispatch` e escolha entre `up`, `down` e `recreate`.
+
+### Resultado
+- **Do zero ao ar em 7 minutos** (`time make up`: `real 7m0s`).
+  - Terraform: ~37 segundos.
+  - cloud-init (pacotes, Docker, clone, imagens, stack): 383 segundos.
+  - O gargalo é o primeiro boot, não o Terraform. Ideias para encurtar: tirar o
+    `package_upgrade`, usar imagem com Docker pronto, publicar as imagens num
+    registry em vez de fazer build no servidor.
+- `up` e `down` funcionando pelo botão, sem nenhum comando no terminal.
+
+### O que aprendi
+- **Makefile:** as linhas de comando começam com TAB (com espaços dá
+  `missing separator`). `$` precisa ser dobrado (`$$`) quando é para o bash, não
+  para o Make. `DOMAIN ?=` usa o valor do ambiente se existir; senão, lê o `tfvars`.
+  `up: init` faz o `init` rodar antes do `up`.
+- **Por que state remoto:** cada execução do GitHub Actions roda numa máquina nova,
+  apagada no fim. Com state local, o `down` pelo botão não saberia o que destruir.
+- **Execution Mode Local x Remote:** no modo Remote, o Terraform rodaria nos
+  servidores da HashiCorp, sem acesso aos meus tokens e variáveis.
+- **Histórico de states:** cada `apply` e `destroy` gera uma versão nova no
+  HCP Terraform. Dá para ver o ambiente ao longo do tempo.
+- **O state é compartilhado:** depois do `up` pelo GitHub, o
+  `terraform output -raw server_ip` no meu computador mostrou o IP do Droplet
+  que o GitHub criou.
+- **Secrets x Variables no GitHub:** secrets ficam escondidos (`***` nos logs) e
+  nunca mais são exibidos; variables são visíveis e servem para o que não é segredo.
+- **Um token por lugar:** `wsl-gabriel` (meu computador) e
+  `github-actions-infra-pdi` (GitHub). Se um vazar, revogo só ele.
+  Tokens do HCP Terraform só aparecem uma vez: se esquecer, gera outro.
+- **`concurrency` no workflow:** impede duas execuções ao mesmo tempo mexendo
+  no mesmo state. **`timeout-minutes`:** para a execução se algo travar.
+
+### Erros e como resolvi
+- **`422 Size is not available in this region` (agora em `tor1`):** a capacidade
+  muda ao longo do dia. A lista da API mostra onde o plano é oferecido, não onde
+  há máquina livre naquele minuto. Troquei a região de novo.
+- **State "vazio" no HCP Terraform depois do `init`:** normal. O state local não
+  tinha recursos (eu tinha feito `make down`), e o Terraform não envia state vazio.
+  O primeiro state apareceu no primeiro `apply`.
+- **`down` pelo botão falhou com `initialization required`:** o alvo `down` não
+  rodava `init`. No meu computador funcionava porque a pasta `.terraform/` já
+  existia; no GitHub, a máquina começa vazia. Correção: alvo `init` e todos os
+  outros dependendo dele.
+  Lição: funcionar na minha máquina não garante funcionar no CI.
+- **Esse erro deixou o Droplet ligado (e cobrando):** depois de qualquer falha no
+  `down`, conferir o painel da DigitalOcean.  
   
