@@ -405,5 +405,69 @@ existem orquestradores como Swarm e Kubernetes.
 ### Para a apresentação
 - Repetir o `drain` com um laço de `curl` rodando ao lado, para mostrar que
   nenhuma requisição falha.
-- Medir o tempo fora do ar do vertical com o laço de `curl` (`grep -c " 000"`).    
+- Medir o tempo fora do ar do vertical com o laço de `curl` (`grep -c " 000"`).  
+
+## Dia 10 — Prova final, produção e preparação da demo
+
+### O que fiz
+- Rodadas de `time make recreate` para medir o ciclo completo.
+- Tirei a linha do staging: certificados do Let's Encrypt de **produção**.
+- `scripts/demo-check.sh`: testa todos os apps, o painel, o redirecionamento
+  e o certificado, **sem `-k`**, como um navegador de verdade.
+- README do projeto, com diagrama, como rodar, números e aprendizados.
+
+### Números do `make recreate`
+| Rodada | Stack respondeu em | Total (`real`) | Observação |
+| --- | --- | --- | --- |
+| 1 | 330 s | 6min20s | Ambiente já destruído: o `down` não tinha nada a fazer |
+| 2 | — | — | Falhou: `SSH Key is already in use` (ver abaixo) |
+| 3 | | | |
+
+### O que aprendi
+- **Idempotência:** rodar `make up` com tudo no ar dá `No changes. Your
+  infrastructure matches the configuration`. O Terraform compara o código com a
+  nuvem e não cria nada à toa.
+- **Staging x produção:** produção tem limite de certificados repetidos por semana
+  e de validações que falham por hora. Testar em staging, subir em produção só no fim.
+- **301 e 308** são redirecionamentos permanentes; os dois levam ao HTTPS.
+- **Testar como o usuário:** um teste que aceita qualquer certificado (`-k`) pode
+  dizer "pronto" com o HTTPS quebrado.
+- **Serviço de metadados** (`169.254.169.254`): de dentro do Droplet, informa o
+  IP público da própria máquina.
+
+### Erros e como resolvi
+- **`422 SSH Key is already in use` no `recreate`:** o `destroy` apagou a chave e o
+  `apply` tentou recriá-la segundos depois. A API respondeu "destruído", mas ainda
+  não tinha liberado a chave: **consistência eventual**.
+  - Correção: pausa de 30 segundos entre o `down` e o `up` no `recreate`.
+  - Solução mais robusta: a chave SSH é um recurso **permanente** da conta, não
+    **efêmero** como o servidor. Cadastrá-la uma vez e só consultá-la com
+    `data "digitalocean_ssh_key"`, para o `destroy` nunca apagá-la.
+
+- **HTTPS quebrado com o `wait-ready` dizendo "Pronto!":**
+  - O `demo-check.sh` deu `000` em tudo, com o certificado
+    `TRAEFIK DEFAULT CERT` (provisório, não confiável).
+  - O `wait-ready.sh` não percebeu porque usava `curl -k`, que aceita qualquer
+    certificado. **Falso positivo.**
+  - Os logs do Traefik mostraram que o Let's Encrypt tentou validar o domínio no
+    IP **`104.248.12.35`**, de um Droplet já destruído. O servidor atual era outro.
+  - Causa: **condição de corrida** entre o boot e o DNS. O Traefik pediu os
+    certificados antes de o DuckDNS apontar para o IP novo (aquele Droplet nasceu
+    na rodada do `recreate` que falhou antes do `curl` do DuckDNS).
+  - Correção na hora: atualizar o DuckDNS, conferir com `dig` e reiniciar o
+    Traefik. Certificado de produção emitido, `Verify return code: 0 (ok)`.
+  - Correção definitiva: no cloud-init, antes do `docker compose up`, um laço que
+    consulta o IP público pelo serviço de metadados e **espera o DNS apontar para
+    ele**. Assim, o pedido de certificado só acontece com o DNS certo.
+  - Lição: o teste de prontidão precisa verificar o que o usuário verifica.
+    Próximo passo: tirar o `-k` do `wait-ready.sh` depois de sair do staging.
+
+### Checklist da demo
+- [x] Ambiente no ar com antecedência e `./scripts/demo-check.sh` todo verde
+- [x] Terminal com `source scripts/env.sh` feito
+- [x] Abas anônimas abertas: n8n, Keycloak, Evolution, API, painel do Traefik,
+      GitHub Actions, HCP Terraform e painel da DigitalOcean
+- [x] Senhas à mão (`terraform output -raw keycloak_admin_password`)
+- [x] Vídeo e prints do plano B
+- [x] `make down` depois da apresentação
   
