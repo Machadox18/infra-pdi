@@ -67,6 +67,35 @@
 - Painel do Traefik em `traefik.localhost`, protegido por usuário e senha.
 - Redes separadas: `proxy` (Traefik + apps) e `backend` (apps + Postgres + Redis).
 
+### Evidência: load balancer e tolerância a falha
+Teste refeito no servidor da DigitalOcean, com HTTPS de produção.
+
+Com 3 cópias da API (`--scale api=3`), 6 requisições seguidas alternaram
+entre os 3 containers:
+
+```
+"container": "cb67e373a211"
+"container": "ad40e02f273a"
+"container": "0523be444260"
+"container": "ad40e02f273a"
+"container": "0523be444260"
+"container": "cb67e373a211"
+```
+
+Depois de `docker stop pdi-api-2` (o container `0523be444260`), as requisições
+continuaram respondendo, só com os 2 containers restantes, sem nenhuma falha:
+
+```
+"container": "cb67e373a211"
+"container": "ad40e02f273a"
+"container": "cb67e373a211"
+"container": "ad40e02f273a"
+"container": "cb67e373a211"
+"container": "ad40e02f273a"
+```
+
+O Traefik tirou a cópia parada da roda sozinho, sem nenhuma configuração extra.
+
 ### O que aprendi
 - **Proxy reverso** fica do lado do servidor: recebe tudo e repassa ao container certo.
 - **Load balancer** é um proxy reverso que distribui requisições entre cópias do
