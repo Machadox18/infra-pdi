@@ -4,7 +4,7 @@ Infraestrutura recriável do zero com um clique: **Terraform + Docker Compose + 
 na DigitalOcean. Projeto prático do meu PDI (Plano de Desenvolvimento Individual)
 em DevOps.
 
-**Do zero ao ar em ~X minutos**: um `make up` (ou um botão no GitHub Actions) cria o
+**Do zero ao ar em cerca de 6 minutos**: um `make up` (ou um botão no GitHub Actions) cria o
 servidor, aplica o hardening, instala o Docker e sobe toda a stack com HTTPS.
 Um `make down` apaga tudo.
 
@@ -122,8 +122,10 @@ Nenhum segredo vai para o Git:
 
 | Medida | Resultado |
 | --- | --- |
-| `make recreate` (3 rodadas) | X min, Y min, Z min |
-| Stack respondendo após o boot | ~X segundos |
+| Do zero ao ar (3 medições) | 7min00s, ~6min30s e 6min20s |
+| Stack respondendo após a criação | 330 a 383 segundos |
+| Criação na nuvem (Terraform) | Menos de 1 minuto |
+| Custo do servidor | US$ 0,036 por hora (centavos por teste) |
 | Gargalo | O primeiro boot (pacotes, Docker, imagens), não o Terraform |
 
 ## Escalonamento
